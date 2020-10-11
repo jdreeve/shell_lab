@@ -170,35 +170,53 @@ void eval(char *cmdline)
 {
     char* argv[MAXARGS]; //arguments list
     int bg = -1; //background job flag
-    int argc = -1;
+    pid_t pid;
+    int jid = -1;
 
     //initialize argv
-    argc = count_args(cmdline);
-    for(int i=0; i<argc; i++){
-    argv[i] = (char*)malloc(sizeof(char) * 100);
+    for (int i=0; i<MAXARGS; i++){
+        argv[i]=NULL;
     }
 
     //parse command line using provided parseline()
     bg = parseline(cmdline, argv);
 
-     builtin_cmd(argv);
-   
-    //free memory allocated to argv
-    for(int i=0; i<argc; i++){
-        free(argv[i]);
+    if(argv[0]==NULL){
+        return;
     }
-    return;
-}
 
-int count_args(char* cmdline){
-    int count=0;
-    for (int i=0; cmdline[i] != '\0' && i<MAXLINE && count < MAXARGS; i++){
-        if (cmdline[i]==' '){
-            count++;
+    if (!builtin_cmd(argv)){
+	
+        sigset_t mask, prev_mask;
+        sigemptyset(&mask);
+	sigaddset(&mask, SIGCHLD);
+        
+	sigprocmask(SIG_BLOCK, &mask, &prev_mask);
+
+        if ((pid=fork()) == 0){//child process to run user job
+	    sigprocmask(SIG_SETMASK, &prev_mask, NULL);
+	    setpgid(0,0);
+            if (execve(argv[0], argv, environ) < 0){
+	        printf("%s: Command not found.\n", argv[0]);
+		exit(0);
+	    }
 	}
-    }
-    return count;
-}
+
+        jid = addjob(jobs, pid, bg+1, cmdline);
+	sigprocmask(SIG_SETMASK, &prev_mask, NULL);
+	/* parent waits for foreground process to terminate */
+
+	if (!bg){
+	    int status;
+	    if(waitpid(pid, &status, 0) < 0){
+	        unix_error("waitfg: waitpid error");
+	    }
+	}//if
+	else{
+            printf("[%d] (%d) %s", jid, pid, cmdline);
+	}//else
+    }//if   
+}//eval
 
 /* 
  * parseline - Parse the command line and build the argv array.
@@ -265,16 +283,19 @@ int builtin_cmd(char **argv)
 {
     //if argv[0] is a built-in, handle it immediately
     if (!strcmp(argv[0], "quit")){
-        exit(0); 
+        exit(0);
     }
     if (!strcmp(argv[0], "fg")){
-        exit(0); 
-    }
+            do_bgfg(argv);
+	    return 1;
+    } 
     if (!strcmp(argv[0], "bg")){
-        exit(0);
+            do_bgfg(argv);
+	    return 1;
     }
     if (!strcmp(argv[0], "jobs")){
-        exit(0);
+        listjobs(jobs);
+	return 1;
     }
     return 0;     /* not a builtin command */
 }
@@ -284,6 +305,23 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
+    pid_t pid = -1;
+    int job_arg_index=1;
+
+    if(!strcmp(argv[1],"%")){
+        //look up job by JID
+	job_arg_index++;
+    }
+    else{
+        //look up job by PID
+    }
+
+    //send SIGCONT signal to job
+    
+    //handle fg option
+    waitfg(pid);
+
+
     return;
 }
 
@@ -292,6 +330,9 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
+    while(fgpid(jobs)==pid){
+      
+    }
     return;
 }
 
@@ -385,7 +426,7 @@ int addjob(struct job_t *jobs, pid_t pid, int state, char *cmdline)
   	    if(verbose){
 	        printf("Added job [%d] %d %s\n", jobs[i].jid, jobs[i].pid, jobs[i].cmdline);
             }
-            return 1;
+            return jobs[i].jid;
 	}
     }
     printf("Tried to create too many jobs\n");
