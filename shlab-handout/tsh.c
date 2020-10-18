@@ -89,7 +89,6 @@ handler_t *Signal(int signum, handler_t *handler);
 
 /* Here are the functions I implemented */
 int count_args(char* cmdline);
-void list_bg_jobs(struct job_t *jobs);
 
 /*
  * main - The shell's main routine 
@@ -391,23 +390,23 @@ void sigchld_handler(int sig)
 {
     //discover all zombie children
     int status;
-    pid_t pid = -1;
+    pid_t pid;
     
-    while ((pid = waitpid(fgpid(jobs), &status, WNOHANG|WUNTRACED)) > 0){
+    while ((pid = waitpid(-1, &status, WNOHANG|WUNTRACED)) > 0){
         if(WIFSTOPPED(status)){//if stopped, update entry in jobs list
         struct job_t* job_entry = getjobpid(jobs, pid);
         job_entry->state = ST;
         int jid = job_entry->jid;
         printf("Job [%d] (%d) stopped by signal %d\n", jid, pid, WSTOPSIG(status));
-    }
-    else if(WIFSIGNALED(status)){//delete from jobs list if terminated
-        int jid=pid2jid(pid);
-        printf("Job [%d] (%d) terminated by signal %d\n", jid, pid, WTERMSIG(status));
-        deletejob(jobs, pid);
-    }
-    else if(WIFEXITED(status)){//job exited
-        deletejob(jobs, pid);    
-    }
+        }
+        else if(WIFSIGNALED(status)){//delete from jobs list if terminated
+            int jid=pid2jid(pid);
+            printf("Job [%d] (%d) terminated by signal %d\n", jid, pid, WTERMSIG(status));
+            deletejob(jobs, pid);
+        }
+        else{//job exited
+            deletejob(jobs, pid);    
+        }
     }
     return;
 }
